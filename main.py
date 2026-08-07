@@ -1,0 +1,139 @@
+"""
+ProbeIQ — AI Interview Agent
+FastAPI app + single /api/interview endpoint.
+
+Turn 1:  POST { sessionId, candidate }  → { reply, done: false }
+Turn 2+: POST { sessionId, message }    → { reply, done: false }
+Final:   POST { sessionId, message }    → { reply, done: true, feedback: {...} }
+"""
+from __future__ import annotations
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
+
+import session_store
+from models import InterviewState
+from planner import build_plan
+from progress import is_done, get_current_plan_entry
+from interviewer import interviewer_agent
+from feedback import feedback_generator
+
+app = FastAPI(title="ProbeIQ — AI Interview Agent", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["*"],
+)
+
+
+# ── Request / Response models ─────────────────────────────────────────────────
+
+class InterviewRequest(BaseModel):
+    sessionId: str
+    candidate: Optional[dict] = None   # required on turn 1 only
+    message:   Optional[str]  = None   # required on turn 2+ only
+
+
+class InterviewResponse(BaseModel):
+    reply:    str
+    done:     bool
+    feedback: Optional[dict] = None    # present only when done=true
+
+
+# ── Route ─────────────────────────────────────────────────────────────────────
+
+@app.post("/api/interview", response_model=InterviewResponse)
+def interview(req: InterviewRequest):
+
+    # ── Turn 1: start a new session ──────────────────────────────────────────
+    if req.candidate is not None:
+        plan = build_plan(req.candidate)
+        state: InterviewState = {
+            "session_id":    req.sessionId,
+            "candidate":     req.candidate,
+            "plan":          plan,
+            "covered_days":  set(),
+            "transcript":    [],
+            "question_count": 0,
+            "status":        "IN_PROGRESS",
+        }
+        session_store.save(state)
+
+        opening = interviewer_agent(state)
+
+        # Log the opening message to transcript
+        first_entry = get_current_plan_entry(state)
+        state["transcript"].append({
+            "role": "interviewer",
+            "text": opening,
+            "day":  first_entry["day"] if first_entry else None,
+        })
+        state["question_count"] += 1
+        session_store.save(state)
+
+        return InterviewResponse(reply=opening, done=False)
+
+    # ── Turn 2+: continue an existing session ────────────────────────────────
+    if not req.message:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide 'candidate' for turn 1, or 'message' for turn 2+.",
+        )
+
+    state = session_store.get(req.sessionId)
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session '{req.sessionId}' not found. Send 'candidate' to start.",
+        )
+    if state["status"] == "DONE":
+        raise HTTPException(status_code=400, detail="This interview is already completed.")
+
+    # Append candidate's reply
+    state["transcript"].append({"role": "candidate", "text": req.message, "day": None})
+
+    # Mark the current plan day as covered (before checking stop condition)
+    current_entry = get_current_plan_entry(state)
+    if current_entry:
+        state["covered_days"].add(current_entry["day"])
+
+    # ── Stop condition check ──────────────────────────────────────────────────
+    if is_done(state):
+        state["status"] = "DONE"
+        fb = feedback_generator(state)
+        session_store.save(state)
+        return InterviewResponse(
+            reply="Thank you — that's the end of our interview. I'll put together your feedback now.",
+            done=True,
+            feedback=fb,
+        )
+
+    # ── Next question ─────────────────────────────────────────────────────────
+    next_question = interviewer_agent(state)
+    next_entry = get_current_plan_entry(state)
+    state["transcript"].append({
+        "role": "interviewer",
+        "text": next_question,
+        "day":  next_entry["day"] if next_entry else None,
+    })
+    state["question_count"] += 1
+    session_store.save(state)
+
+    return InterviewResponse(reply=next_question, done=False)
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "sessions": session_store.count()}
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
