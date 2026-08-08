@@ -16,7 +16,7 @@ import session_store
 from models import InterviewState
 from planner import build_plan
 from progress import is_done, get_current_plan_entry
-from interviewer import interviewer_agent
+from interviewer import interviewer_agent, should_followup
 from feedback import feedback_generator
 
 app = FastAPI(title="ProbeIQ — AI Interview Agent", version="1.0.0")
@@ -95,10 +95,12 @@ def interview(req: InterviewRequest):
     # Append candidate's reply
     state["transcript"].append({"role": "candidate", "text": req.message, "day": None})
 
-    # Mark the current plan day as covered (before checking stop condition)
-    current_entry = get_current_plan_entry(state)
-    if current_entry:
-        state["covered_days"].add(current_entry["day"])
+    # Decide follow-up on active topic vs advance to next topic
+    do_followup, active_entry, active_day = should_followup(state, req.message)
+
+    # Mark active day as covered only when NOT following up on it anymore
+    if not do_followup and active_day is not None:
+        state["covered_days"].add(active_day)
 
     # ── Stop condition check ──────────────────────────────────────────────────
     if is_done(state):
@@ -111,13 +113,17 @@ def interview(req: InterviewRequest):
             feedback=fb,
         )
 
-    # ── Next question ─────────────────────────────────────────────────────────
-    next_question = interviewer_agent(state)
-    next_entry = get_current_plan_entry(state)
+    # ── Next question / follow-up ─────────────────────────────────────────────
+    target_entry = active_entry if do_followup else get_current_plan_entry(state)
+    next_question = interviewer_agent(
+        state,
+        target_entry=target_entry,
+        is_followup=do_followup,
+    )
     state["transcript"].append({
         "role": "interviewer",
         "text": next_question,
-        "day":  next_entry["day"] if next_entry else None,
+        "day":  target_entry["day"] if target_entry else None,
     })
     state["question_count"] += 1
     session_store.save(state)
