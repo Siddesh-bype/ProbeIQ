@@ -15,7 +15,7 @@ CURRICULUM_PATH = Path("curriculum.json")
 # Cached once at startup
 _days_by_number: dict[int, dict] = {}
 
-HIGH_VALUE_TYPES = {"AI_CORE", "BUILD", "CAPSTONE"}
+HIGH_VALUE_TYPES = {"AI_CORE", "BUILD", "CAPSTONE", "OPTIMIZE", "SHIP_IT"}
 LOW_VALUE_TYPES  = {"SETUP"}
 
 
@@ -96,11 +96,28 @@ def build_plan(candidate: dict) -> list[PlanEntry]:
                 "title":      day_data["title"],
                 "objectives": day_data.get("objectives", []),
                 "tools":      day_data.get("tools", []),
-                "reason":     "fallback (thin plan)",
+                "reason":     "fallback (thin candidate missions)",
                 "priority":   "low",
             })
             existing_days.add(day_num)
             if len(plan) >= 4:
                 break
+
+    # Secondary fallback: pad from general curriculum if candidate has < 4 total missions
+    if len(plan) < 4:
+        existing_days = {e["day"] for e in plan}
+        for day_num, day_data in _days_by_number.items():
+            if day_num not in existing_days:
+                plan.append({
+                    "day":        day_num,
+                    "title":      day_data["title"],
+                    "objectives": day_data.get("objectives", []),
+                    "tools":      day_data.get("tools", []),
+                    "reason":     "fallback (curriculum pad)",
+                    "priority":   "low",
+                })
+                existing_days.add(day_num)
+                if len(plan) >= 4:
+                    break
 
     return plan[:10]  # cap at 10 days (gives follow-up room without going too long)

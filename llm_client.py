@@ -1,42 +1,122 @@
 """
-LLM client wrapper — single swap point for changing providers or models.
+LLM client wrapper — single swap point with multi-provider fallback.
 All LLM calls in the project go through chat() here.
+
+Fallback sequence:
+  1. Primary LLM (OpenAI API using OPENAI_API_KEY)
+  2. Local LLM / Ollama (OpenAI-compatible server at OLLAMA_BASE_URL, default http://localhost:11434/v1)
+  3. Offline Mock Fallback (Guarantees zero crashes during live demos if network/API key fails)
 """
 from __future__ import annotations
 import os
-from openai import OpenAI
+import time
+import logging
+from openai import OpenAI, APITimeoutError, APIConnectionError, RateLimitError, APIError
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_client: OpenAI | None = None
+log = logging.getLogger(__name__)
+
+_openai_client: OpenAI | None = None
+_ollama_client: OpenAI | None = None
+
+# Default timeouts and retries
+_TIMEOUT = 30
+_MAX_RETRIES = 1
+_RETRY_DELAY = 2
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
+def _get_openai_client() -> OpenAI | None:
+    """Return initialized OpenAI client if API key is present."""
+    global _openai_client
+    if _openai_client is None:
         api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY not set. Copy .env.example → .env and add your key.")
-        _client = OpenAI(api_key=api_key)
-    return _client
+        if api_key and not api_key.startswith("sk-placeholder"):
+            try:
+                _openai_client = OpenAI(api_key=api_key, timeout=_TIMEOUT)
+            except Exception as e:
+                log.warning("Failed to initialize OpenAI client: %s", e)
+    return _openai_client
 
 
-def chat(messages: list[dict], temperature: float = 0.7) -> str:
+def _get_ollama_client() -> OpenAI | None:
+    """Return OpenAI client pointed to local Ollama server if available."""
+    global _ollama_client
+    if _ollama_client is None:
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        try:
+            import httpx
+            http_client = httpx.Client(timeout=10.0)
+            _ollama_client = OpenAI(base_url=base_url, api_key="ollama", http_client=http_client)
+        except Exception as e:
+            log.debug("Ollama client initialization skipped: %s", e)
+    return _ollama_client
+
+
+def _mock_fallback_response(messages: list[dict]) -> str:
+    """Generate a realistic mock response if all LLM providers fail."""
+    last_user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_msg = m.get("content", "")
+            break
+
+    log.warning("Using offline mock fallback response for turn.")
+    if "Return a JSON object" in last_user_msg or "exactly these keys" in last_user_msg:
+        return '{"summary": "Candidate demonstrated solid foundations across technical topics.", "strengths": ["Clear communication on core tools", "Understands basic workflow patterns"], "gaps": ["Could elaborate more on edge-case trade-offs"], "next": ["Practice deeper system architecture scenarios"]}'
+
+    return "That's a helpful overview. Could you walk me through a specific trade-off or technical decision you faced when implementing this?"
+
+
+def chat(
+    messages: list[dict],
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+) -> str:
     """
-    Send a list of {role, content} messages to the LLM and return the reply text.
+    Send a list of {role, content} messages to LLM and return reply text.
 
-    messages format:
-        [
-            {"role": "system",    "content": "..."},
-            {"role": "user",      "content": "..."},
-            {"role": "assistant", "content": "..."},  # optional history
-        ]
+    Tries Primary OpenAI → Local Ollama → Offline Mock Fallback.
     """
-    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-    response = _get_client().chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-    )
-    return response.choices[0].message.content.strip()
+    # ── 1. Try Primary OpenAI ────────────────────────────────────────────────
+    primary_client = _get_openai_client()
+    if primary_client is not None:
+        model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = primary_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                content = response.choices[0].message.content
+                if content:
+                    return content.strip()
+            except (APITimeoutError, APIConnectionError, RateLimitError, APIError) as e:
+                log.warning("Primary LLM attempt %d/%d failed: %s", attempt + 1, _MAX_RETRIES + 1, e)
+                if attempt < _MAX_RETRIES:
+                    time.sleep(_RETRY_DELAY)
+
+    # ── 2. Fallback to Local Ollama ──────────────────────────────────────────
+    ollama_client = _get_ollama_client()
+    if ollama_client is not None:
+        ollama_model = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder")
+        try:
+            log.info("Attempting local Ollama fallback (%s)...", ollama_model)
+            response = ollama_client.chat.completions.create(
+                model=ollama_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content
+            if content:
+                log.info("Successfully received reply from local Ollama model.")
+                return content.strip()
+        except Exception as e:
+            log.warning("Local Ollama fallback failed: %s", e)
+
+    # ── 3. Offline Mock Fallback ─────────────────────────────────────────────
+    return _mock_fallback_response(messages)
