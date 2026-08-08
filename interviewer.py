@@ -15,9 +15,17 @@ from progress import get_current_plan_entry
 from llm_client import chat
 
 _SYSTEM = (
-    "You are a skilled technical interviewer conducting an interview for an AI engineering program. "
-    "Be professional, curious, and encouraging — never adversarial. "
-    "Ask ONE focused question at a time. Keep questions concise."
+    "You are Alex, a senior technical interviewer with 10 years of experience conducting interviews for AI engineering programs. "
+    "Your style: warm but technically rigorous, genuinely curious, excellent active listener who builds on what candidates say. "
+    "\n\n"
+    "Core principles:\n"
+    "- ALWAYS acknowledge what the candidate just said before moving forward\n"
+    "- Use natural conversational connectors: 'That's interesting...', 'I see...', 'Building on that...', 'Tell me more about...'\n"
+    "- Ask ONE focused question at a time, but make it feel like a conversation, not an interrogation\n"
+    "- Vary your question types naturally: open-ended exploration, specific probes, trade-off questions, 'walk me through' requests\n"
+    "- When appropriate, briefly share context or observations before asking\n"
+    "- Show genuine interest in understanding their experience and thought process\n"
+    "- Be encouraging and professional — never adversarial or robotic"
 )
 
 _THIN_ANSWER_WORDS = 25
@@ -43,18 +51,24 @@ def _get_persona_guidance(candidate_info: tuple[str, str, str | int]) -> str:
 
     if years >= 6:
         return (
-            f"Persona Mode: Senior Expert Interviewer. Target Role: {role} ({years} yrs exp). "
-            "Probe for system design trade-offs, architecture scalability, failure modes, and production edge cases."
+            f"Persona Mode: Senior Expert Interviewer. Target Role: {role} ({years} yrs exp).\n"
+            "Question depth: Probe for system design trade-offs, architecture scalability, failure modes, and production edge cases. "
+            "Ask about technical decisions, alternatives considered, and lessons learned from building at scale. "
+            "Expect detailed answers with architectural reasoning."
         )
     elif years >= 3:
         return (
-            f"Persona Mode: Mid-level Practitioner Interviewer. Target Role: {role} ({years} yrs exp). "
-            "Probe for implementation details, framework/API choices, design patterns, and debugging experience."
+            f"Persona Mode: Mid-level Practitioner Interviewer. Target Role: {role} ({years} yrs exp).\n"
+            "Question depth: Focus on implementation details, framework/API choices, design patterns, debugging experience. "
+            "Ask about specific code decisions, testing approaches, and how they solved concrete problems. "
+            "Balance conceptual understanding with hands-on execution."
         )
     else:
         return (
-            f"Persona Mode: Encouraging Mentor Interviewer. Target Role: {role} ({years} yrs exp). "
-            "Focus on core conceptual clarity, foundational tool usage, step-by-step reasoning, and supportive tone."
+            f"Persona Mode: Encouraging Mentor Interviewer. Target Role: {role} ({years} yrs exp).\n"
+            "Question depth: Focus on conceptual clarity, foundational tool usage, step-by-step reasoning. "
+            "Use supportive tone, celebrate learning moments, guide through thought process. "
+            "Ask 'how did you learn' and 'what made sense' questions. Keep explanations accessible."
         )
 
 
@@ -249,7 +263,12 @@ def interviewer_agent(
         candidate_info = _get_candidate_info(state["candidate"])
         prompt = _question_prompt(candidate_info, entry, state, do_followup)
 
-    return chat([{"role": "system", "content": _SYSTEM}, {"role": "user", "content": prompt}])
+    # Use higher temperature for more natural, varied responses
+    return chat(
+        [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": prompt}],
+        temperature=0.85,
+        max_tokens=1024
+    )
 
 
 def _opening_prompt(candidate_info: tuple[str, str, str | int], entry: PlanEntry) -> str:
@@ -260,20 +279,29 @@ def _opening_prompt(candidate_info: tuple[str, str, str | int], entry: PlanEntry
     if _is_skipped_topic(entry):
         skipped_note = (
             "\nNote: The candidate skipped this mission. Frame your question gently — "
-            "ask if they got a chance to explore the topic, don't assume they completed it."
+            "ask if they explored this topic at all, without assuming they completed it."
         )
 
     return f"""Candidate: {name}, {exp} years experience, role: {role}
 {persona}
 
-Open the interview with a warm, personalized greeting (1–2 sentences), then ask your first question.
+CONVERSATION STYLE EXAMPLES:
+
+Example Opening 1 (Senior):
+"Hi Sarah! Thanks for joining me today. I've been looking forward to this conversation — I can see from your profile you've been working with AI systems for quite a while now. Let's dive into your recent experience with the program. I noticed you worked through embeddings and vector databases early on — can you walk me through how you approached building your first retrieval system?"
+
+Example Opening 2 (Junior):
+"Hey Alex! Great to meet you. I'm excited to hear about your journey through the AI program so far. I know you're relatively new to this space, so I'm really interested in understanding how you're thinking about these concepts. Let's start with embeddings — when you first encountered that topic, what clicked for you, and what felt challenging?"
+
+YOUR TASK:
+Open the interview with a warm, personalized greeting (1-2 sentences that acknowledge their background), then naturally transition into your first question.
 
 First topic — Day {entry['day']}: {entry['title']}
 Objectives: {', '.join(entry['objectives'][:3])}
-Tools: {', '.join(entry['tools'][:4])}
+Tools mentioned: {', '.join(entry['tools'][:4])}
 Context: {entry['reason']}{skipped_note}
 
-Return only the greeting + first question. No preamble."""
+Return ONLY your opening message (greeting + first question). Make it conversational and natural."""
 
 
 def _question_prompt(
@@ -288,30 +316,48 @@ def _question_prompt(
 
     if follow_up:
         action = (
-            "The candidate's last answer was brief or didn't engage with topic specifics. "
-            "Ask a follow-up that probes deeper on the SAME topic. Reference a specific objective or tool."
+            "The candidate's last answer was brief or surface-level. Ask a natural follow-up that digs deeper into the SAME topic. "
+            "\n\nFollow-up style examples:\n"
+            "- 'That makes sense — can you walk me through a specific example of how you used [tool/concept]?'\n"
+            "- 'Interesting. What trade-offs did you consider when you made that choice?'\n"
+            "- 'I see. Tell me more about [specific thing they mentioned] — how did that work out?'\n"
+            "- 'Building on that, what challenges did you run into with [aspect of their answer]?'\n"
+            "\nAcknowledge their previous answer, then probe deeper naturally. Reference something specific they said."
         )
     else:
-        transition = f"Move naturally to the next topic — Day {entry['day']}: {entry['title']}."
+        transition = f"Move to the next topic — Day {entry['day']}: {entry['title']}."
         if _is_skipped_topic(entry):
             transition += (
-                " The candidate skipped this mission, so frame the question gently — "
-                "ask if they got a chance to explore this area, rather than assuming completion."
+                "\n\nThe candidate skipped this mission. Transition gently:\n"
+                "- 'Let's shift to [topic] — did you get a chance to explore this area at all?'\n"
+                "- 'Moving on to [topic] — I know not everyone gets to every mission. How familiar are you with...?'"
             )
         else:
-            transition += " Briefly acknowledge the transition."
+            transition += (
+                "\n\nTransition naturally. Examples:\n"
+                "- 'That's helpful context. Let's talk about [new topic] now — [question]?'\n"
+                "- 'Great. Building on that foundation, I'm curious about your work with [new topic]. [question]?'\n"
+                "- 'I see. Shifting gears a bit — [acknowledge their work], now let's explore [new topic]. [question]?'"
+            )
         action = transition
+
+    last_answer = _last_candidate_answer(state)
+    last_answer_preview = last_answer[:200] + "..." if len(last_answer) > 200 else last_answer
 
     return f"""Candidate: {name}, {role}
 {persona}
 
 Current topic — Day {entry['day']}: {entry['title']}
 Objectives: {', '.join(entry['objectives'][:3])}
-Tools: {', '.join(entry['tools'][:4])}
+Tools mentioned: {', '.join(entry['tools'][:4])}
 Context: {entry['reason']}
 
 Recent conversation:
 {_recent_transcript_text(state)}
 
+Candidate's most recent answer:
+"{last_answer_preview}"
+
 Task: {action}
-Return only the question text. No preamble."""
+
+Return ONLY your next question/response. Be conversational and natural — acknowledge what they said, then continue."""

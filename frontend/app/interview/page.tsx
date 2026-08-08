@@ -67,21 +67,23 @@ export default function InterviewPage() {
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-3 border-b border-[#E4E7EB] bg-white flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-[#1E3A5F] flex items-center justify-center
-            text-white font-bold text-sm select-none">
-            {initials}
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#2563EB] to-[#1E3A5F]
+            flex items-center justify-center text-white font-bold text-xs select-none shadow-sm">
+            AI
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm text-[#0F172A]">{candidateName}</span>
-              <span className="text-xs font-medium bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full">
-                {candidateRole}
+              <span className="font-semibold text-sm text-[#0F172A]">Alex</span>
+              <span className="text-xs font-medium bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+                Technical Interviewer
               </span>
             </div>
-            <div className="text-xs text-slate-500 mt-0.5">Interview in progress</div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              Interviewing {candidateName}
+            </div>
           </div>
         </div>
-        <div className="text-xs text-slate-400 tabular-nums">Q {qCount} / 8+</div>
+        <div className="text-xs text-slate-400 tabular-nums">Q {qCount} / ~8-12</div>
       </header>
 
       {/* Messages */}
@@ -108,7 +110,8 @@ export default function InterviewPage() {
 
         {typing && (
           <div className="flex justify-start fade-up">
-            <div className="bg-white border border-[#E4E7EB] rounded-xl rounded-bl-sm px-4 py-3.5 flex gap-1.5 items-center">
+            <div className="bg-white border border-[#E4E7EB] rounded-xl rounded-bl-sm px-4 py-3 flex gap-1.5 items-center">
+              <span className="text-xs text-slate-500 mr-1.5">Alex is typing</span>
               <span className="w-2 h-2 rounded-full bg-slate-400 typing-dot" />
               <span className="w-2 h-2 rounded-full bg-slate-400 typing-dot" />
               <span className="w-2 h-2 rounded-full bg-slate-400 typing-dot" />
