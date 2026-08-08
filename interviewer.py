@@ -178,10 +178,25 @@ def _extract_keywords(entry: PlanEntry) -> set[str]:
     return keywords
 
 
+def _is_explicit_unknown(text: str) -> bool:
+    """Check if candidate explicitly says they don't know or didn't do it."""
+    lower = text.lower().strip()
+    unknown_phrases = [
+        "i don't know", "i dont know", "not sure", "no idea",
+        "didn't do", "didnt do", "haven't done", "havent done",
+        "skipped", "i don't", "i dont", "don't remember", "dont remember"
+    ]
+    return any(phrase in lower for phrase in unknown_phrases) and len(text.split()) < 15
+
+
 def _is_thin(text: str, entry: PlanEntry) -> bool:
     """Determine if candidate answer is too thin to move on."""
     words = text.split()
     word_count = len(words)
+
+    # Explicit "I don't know" should NOT trigger follow-up
+    if _is_explicit_unknown(text):
+        return False
 
     if word_count < 8:
         return True
@@ -224,6 +239,10 @@ def should_followup(
     active_entry = next((e for e in state["plan"] if e["day"] == active_day), None)
     if not active_entry:
         return False, None, active_day
+
+    # If candidate explicitly says "I don't know" or similar, move on immediately
+    if _is_explicit_unknown(last_message):
+        return False, active_entry, active_day
 
     followups_done = _followups_on_current_day(state, active_day)
     is_thin_answer = _is_thin(last_message, active_entry)
@@ -325,7 +344,20 @@ def _question_prompt(
             "\nAcknowledge their previous answer, then probe deeper naturally. Reference something specific they said."
         )
     else:
-        transition = f"Move to the next topic — Day {entry['day']}: {entry['title']}."
+        # Check if we're moving away from a topic the candidate didn't know about
+        last_answer = _last_candidate_answer(state)
+        graceful_pivot = ""
+        if _is_explicit_unknown(last_answer):
+            graceful_pivot = (
+                "\n\nIMPORTANT: The candidate indicated they don't know about or didn't work on the previous topic. "
+                "Acknowledge this gracefully and move on WITHOUT dwelling on it. Examples:\n"
+                "- 'No problem — let's move to something else. [new topic question]'\n"
+                "- 'That's okay! Let me shift to [new topic]. [question]'\n"
+                "- 'Got it. Let's talk about [new topic] instead. [question]'\n"
+                "\nDo NOT explain why you're moving on, just transition smoothly."
+            )
+
+        transition = f"Move to the next topic — Day {entry['day']}: {entry['title']}.{graceful_pivot}"
         if _is_skipped_topic(entry):
             transition += (
                 "\n\nThe candidate skipped this mission. Transition gently:\n"
