@@ -1,20 +1,28 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { CANDIDATES } from '@/lib/candidates'
+import type { Candidate } from '@/lib/types'
+import { getCandidates } from '@/lib/candidates'
 import { startInterview } from '@/lib/api'
 
 export default function HomePage() {
   const router = useRouter()
+  const [candidates, setCandidates] = useState<Candidate[]>([])
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getCandidates()
+      .then(setCandidates)
+      .catch(() => setError('Failed to load candidates. Is the backend running?'))
+  }, [])
 
   async function handleStart() {
     if (selectedIdx === null) return
     setLoading(true)
     setError(null)
-    const candidate = CANDIDATES[selectedIdx]
+    const candidate = candidates[selectedIdx]
     const sessionId = crypto.randomUUID()
 
     try {
@@ -43,7 +51,10 @@ export default function HomePage() {
         </h2>
 
         <div className="flex flex-col gap-3 mb-6">
-          {CANDIDATES.map((c, i) => (
+          {candidates.length === 0 && !error && (
+            <div className="text-center text-slate-500 text-sm py-4">Loading candidates...</div>
+          )}
+          {candidates.map((c, i) => (
             <button
               key={c.member.id}
               onClick={() => setSelectedIdx(i)}

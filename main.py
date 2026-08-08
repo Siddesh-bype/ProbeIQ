@@ -7,6 +7,8 @@ Turn 2+: POST { sessionId, message }    → { reply, done: false }
 Final:   POST { sessionId, message }    → { reply, done: true, feedback: {...} }
 """
 from __future__ import annotations
+import json
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -137,6 +139,19 @@ def interview(req: InterviewRequest):
     session_store.save(state)
 
     return InterviewResponse(reply=next_question, done=False)
+
+
+# ── Candidates endpoint ───────────────────────────────────────────────────────
+
+@app.get("/api/candidates")
+def get_candidates():
+    """Return all candidates from candidates.json for frontend picker."""
+    candidates_path = Path("candidates.json")
+    if not candidates_path.exists():
+        raise HTTPException(status_code=500, detail="candidates.json not found")
+    with open(candidates_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("candidates", [])
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
