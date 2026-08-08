@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ProbeIQ — AI Interview Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── Design tokens ─────────────────────────────────────────── */
+:root {
+  --color-primary:    #1E3A5F;
+  --color-secondary:  #2563EB;
+  --color-accent:     #059669;
+  --color-background: #F8FAFC;
+  --color-foreground: #0F172A;
+  --color-muted:      #F1F3F5;
+  --color-border:     #E4E7EB;
+  --color-destructive:#DC2626;
+  --color-ring:       #1E3A5F;
+  --radius:           12px;
+  --shadow-sm:        0 1px 3px rgba(0,0,0,.08);
+  --shadow-md:        0 4px 16px rgba(0,0,0,.10);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* ── Reset ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--color-background); color: var(--color-foreground); min-height: 100vh; }
+button { cursor: pointer; font-family: inherit; }
+textarea { font-family: inherit; }
+
+/* ── Screen routing ────────────────────────────────────────── */
+.screen { display: none; }
+.screen.active { display: flex; }
+
+/* ══════════════════════════════════════════════════════════════
+   START SCREEN
+══════════════════════════════════════════════════════════════ */
+#screen-start {
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: linear-gradient(145deg, #0f172a 0%, #1e3a5f 60%, #1e40af 100%);
+}
+.start-logo {
+  font-size: 2rem; font-weight: 700; color: #fff;
+  letter-spacing: -.5px; margin-bottom: .4rem;
+}
+.start-tagline { color: #94a3b8; font-size: .95rem; margin-bottom: 2.5rem; }
+
+.start-card {
+  background: #fff;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 2rem;
+  width: 100%; max-width: 520px;
+}
+.start-card h2 { font-size: 1.1rem; font-weight: 600; color: var(--color-primary); margin-bottom: 1rem; }
+
+.candidate-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1.5rem; }
+.candidate-btn {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .9rem 1rem;
+  border: 1.5px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  transition: border-color 150ms, background 150ms;
+}
+.candidate-btn:hover { border-color: var(--color-secondary); background: #eff6ff; }
+.candidate-btn.selected { border-color: var(--color-secondary); background: #eff6ff; }
+.candidate-btn .cname { font-weight: 600; font-size: .95rem; color: var(--color-foreground); }
+.candidate-btn .cmeta { font-size: .8rem; color: #64748b; margin-top: .2rem; }
+.candidate-btn .cinfo { display: flex; flex-direction: column; }
+.candidate-btn .cbadge {
+  font-size: .72rem; font-weight: 500; background: #dbeafe; color: #1d4ed8;
+  padding: .2rem .55rem; border-radius: 99px; white-space: nowrap;
+}
+
+#btn-start {
+  width: 100%; padding: .85rem;
+  background: var(--color-primary);
+  color: #fff; font-weight: 600; font-size: 1rem;
+  border: none; border-radius: 8px;
+  transition: background 150ms, transform 100ms;
+}
+#btn-start:hover:not(:disabled) { background: #16304f; }
+#btn-start:active:not(:disabled) { transform: scale(.98); }
+#btn-start:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ══════════════════════════════════════════════════════════════
+   CHAT SCREEN
+══════════════════════════════════════════════════════════════ */
+#screen-chat {
+  flex-direction: column;
+  height: 100vh;
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.chat-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+  background: #fff;
+  flex-shrink: 0;
+}
+.chat-header-left { display: flex; align-items: center; gap: .75rem; }
+.chat-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--color-primary);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: .95rem;
+}
+.chat-name { font-weight: 600; font-size: .95rem; }
+.chat-role-badge {
+  font-size: .72rem; font-weight: 500;
+  background: #dbeafe; color: #1d4ed8;
+  padding: .2rem .55rem; border-radius: 99px;
+}
+.chat-status { font-size: .78rem; color: #64748b; margin-top: .1rem; }
+
+.messages-wrap {
+  flex: 1; overflow-y: auto;
+  padding: 1.25rem;
+  display: flex; flex-direction: column; gap: .75rem;
+  background: var(--color-background);
+}
+
+.message { display: flex; gap: .6rem; max-width: 85%; animation: fadeUp .2s ease; }
+@keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+.message-interviewer { align-self: flex-start; }
+.message-candidate   { align-self: flex-end; flex-direction: row-reverse; }
+.message-system      { align-self: center; }
+
+.bubble {
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  font-size: .9rem; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word;
+}
+.message-interviewer .bubble {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+  border-bottom-left-radius: 4px;
+}
+.message-candidate .bubble {
+  background: var(--color-primary);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.message-system .bubble {
+  background: #fef9c3; color: #854d0e;
+  border: 1px solid #fde047; font-size: .82rem;
+}
+
+/* typing indicator */
+.typing { display: flex; gap: 5px; align-items: center; padding: .85rem 1rem; }
+.typing span {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #94a3b8;
+  animation: blink 1.2s infinite;
+}
+.typing span:nth-child(2) { animation-delay: .2s; }
+.typing span:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%,60%,100% { opacity:.3; transform:scale(1); } 30% { opacity:1; transform:scale(1.2); } }
+
+.input-area {
+  display: flex; gap: .6rem; align-items: flex-end;
+  padding: .9rem 1.25rem;
+  border-top: 1px solid var(--color-border);
+  background: #fff;
+  flex-shrink: 0;
+}
+#msg-input {
+  flex: 1; resize: none; max-height: 120px;
+  padding: .65rem .9rem;
+  border: 1.5px solid var(--color-border);
+  border-radius: 8px;
+  font-size: .9rem; line-height: 1.5;
+  outline: none; transition: border-color 150ms;
+}
+#msg-input:focus { border-color: var(--color-secondary); }
+#btn-send {
+  padding: .65rem 1.2rem;
+  background: var(--color-secondary);
+  color: #fff; font-weight: 600; font-size: .9rem;
+  border: none; border-radius: 8px;
+  transition: background 150ms;
+  white-space: nowrap;
+}
+#btn-send:hover:not(:disabled) { background: #1d4ed8; }
+#btn-send:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ══════════════════════════════════════════════════════════════
+   FEEDBACK SCREEN
+══════════════════════════════════════════════════════════════ */
+#screen-feedback {
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  padding: 2.5rem 1rem 3rem;
+  background: var(--color-background);
+}
+.feedback-header { text-align: center; margin-bottom: 2rem; }
+.feedback-header h1 { font-size: 1.6rem; font-weight: 700; color: var(--color-primary); }
+.feedback-header p { color: #64748b; margin-top: .4rem; font-size: .9rem; }
+
+.feedback-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  width: 100%; max-width: 860px;
+  margin-bottom: 2rem;
+}
+.feedback-card {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+.feedback-card h3 {
+  font-size: .8rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: #64748b; margin-bottom: .75rem;
+}
+.feedback-card p { font-size: .9rem; line-height: 1.6; color: var(--color-foreground); }
+.feedback-card ul { list-style: none; display: flex; flex-direction: column; gap: .5rem; }
+.feedback-card li { font-size: .88rem; line-height: 1.5; color: var(--color-foreground); padding-left: 1.1rem; position: relative; }
+.feedback-card li::before { content: '•'; position: absolute; left: 0; color: var(--color-accent); font-weight: 700; }
+
+.card-summary  { border-top: 3px solid var(--color-primary); }
+.card-strengths{ border-top: 3px solid var(--color-accent); }
+.card-gaps     { border-top: 3px solid #f59e0b; }
+.card-next     { border-top: 3px solid var(--color-secondary); }
+
+#btn-restart {
+  padding: .8rem 2rem;
+  background: var(--color-primary);
+  color: #fff; font-weight: 600; font-size: .95rem;
+  border: none; border-radius: 8px;
+  transition: background 150ms;
+}
+#btn-restart:hover { background: #16304f; }
+
+/* ── Responsive ────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .start-card { padding: 1.25rem; }
+  .messages-wrap { padding: .9rem; }
+  .input-area { padding: .75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══ START SCREEN ══════════════════════════════════════════ -->
+<div id="screen-start" class="screen active">
+  <div class="start-logo">⬡ ProbeIQ</div>
+  <p class="start-tagline">AI-powered technical interview agent</p>
+  <div class="start-card">
+    <h2>Select a Candidate</h2>
+    <div class="candidate-list" id="candidate-list"></div>
+    <button id="btn-start" disabled>Start Interview →</button>
+  </div>
+</div>
+
+<!-- ══ CHAT SCREEN ═══════════════════════════════════════════ -->
+<div id="screen-chat" class="screen">
+  <header class="chat-header">
+    <div class="chat-header-left">
+      <div class="chat-avatar" id="chat-avatar">?</div>
+      <div>
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <span class="chat-name" id="chat-name"></span>
+          <span class="chat-role-badge" id="chat-role"></span>
+        </div>
+        <div class="chat-status" id="chat-status">Interview in progress</div>
+      </div>
+    </div>
+    <div style="font-size:.8rem;color:#64748b;" id="chat-counter">Q 0 / 8+</div>
+  </header>
+  <div class="messages-wrap" id="messages"></div>
+  <div class="input-area">
+    <textarea id="msg-input" placeholder="Type your answer… (Enter to send, Shift+Enter for newline)" rows="2"></textarea>
+    <button id="btn-send">Send</button>
+  </div>
+</div>
+
+<!-- ══ FEEDBACK SCREEN ═══════════════════════════════════════ -->
+<div id="screen-feedback" class="screen">
+  <div class="feedback-header">
+    <h1>Interview Complete</h1>
+    <p id="fb-candidate-name">Feedback for candidate</p>
+  </div>
+  <div class="feedback-grid">
+    <div class="feedback-card card-summary"  id="fb-summary"></div>
+    <div class="feedback-card card-strengths" id="fb-strengths"></div>
+    <div class="feedback-card card-gaps"     id="fb-gaps"></div>
+    <div class="feedback-card card-next"     id="fb-next"></div>
+  </div>
+  <button id="btn-restart">← New Interview</button>
+</div>
+
+<script>
+/* ── Config ─────────────────────────────────────────────────── */
+const API = 'http://localhost:8000/api/interview';
+
+/* ── Demo candidates ─────────────────────────────────────────── */
+const CANDIDATES = [
+  {
+    member: { id: 'c1', name: 'Alex Chen', jobRole: 'ML Engineer', yearsExperience: 2, education: 'BS Computer Science', status: 'active' },
+    missions: [
+      { day: 2, attempts: 1, passed: true,  skipped: false },
+      { day: 3, attempts: 2, passed: true,  skipped: false },
+      { day: 4, attempts: 4, passed: true,  skipped: false },
+      { day: 5, attempts: 1, passed: false, skipped: true  },
+      { day: 6, attempts: 3, passed: true,  skipped: false },
+    ],
+    signals: { commitDays: 15, missionsCompleted: 4, missionsFirstTry: 2 }
+  },
+  {
+    member: { id: 'c2', name: 'Priya Nair', jobRole: 'AI Engineer', yearsExperience: 3, education: 'MS Data Science', status: 'active' },
+    missions: [
+      { day: 1, attempts: 1, passed: true,  skipped: false },
+      { day: 2, attempts: 1, passed: true,  skipped: false },
+      { day: 3, attempts: 2, passed: true,  skipped: false },
+      { day: 4, attempts: 1, passed: true,  skipped: false },
+      { day: 5, attempts: 3, passed: true,  skipped: false },
+      { day: 6, attempts: 2, passed: true,  skipped: false },
+    ],
+    signals: { commitDays: 22, missionsCompleted: 6, missionsFirstTry: 4 }
+  },
+  {
+    member: { id: 'c3', name: 'Jordan Kim', jobRole: 'Full-Stack Dev', yearsExperience: 1, education: 'Bootcamp Graduate', status: 'active' },
+    missions: [
+      { day: 2, attempts: 3, passed: true,  skipped: false },
+      { day: 3, attempts: 1, passed: false, skipped: true  },
+      { day: 5, attempts: 2, passed: true,  skipped: false },
+      { day: 7, attempts: 5, passed: true,  skipped: false },
+    ],
+    signals: { commitDays: 9, missionsCompleted: 3, missionsFirstTry: 1 }
+  }
+];
+
+/* ── State ──────────────────────────────────────────────────── */
+let state = { sessionId: null, candidate: null, selectedIdx: null, questionCount: 0 };
+
+/* ── Candidate list ─────────────────────────────────────────── */
+function initCandidates() {
+  const list = document.getElementById('candidate-list');
+  CANDIDATES.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'candidate-btn';
+    btn.setAttribute('aria-label', `Select ${c.member.name}`);
+    btn.innerHTML = `
+      <div class="cinfo">
+        <span class="cname">${esc(c.member.name)}</span>
+        <span class="cmeta">${esc(c.member.jobRole)} · ${c.member.yearsExperience}y · ${esc(c.member.education)}</span>
+      </div>
+      <span class="cbadge">${c.signals.missionsCompleted} missions</span>`;
+    btn.onclick = () => selectCandidate(i, btn);
+    list.appendChild(btn);
+  });
+}
+
+function selectCandidate(i, el) {
+  state.selectedIdx = i;
+  document.querySelectorAll('.candidate-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('btn-start').disabled = false;
+}
+
+/* ── Start interview ─────────────────────────────────────────── */
+async function startInterview() {
+  const c = CANDIDATES[state.selectedIdx];
+  state.candidate = c;
+  state.sessionId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
+  state.questionCount = 0;
+
+  const initials = c.member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  document.getElementById('chat-avatar').textContent = initials;
+  document.getElementById('chat-name').textContent = c.member.name;
+  document.getElementById('chat-role').textContent  = c.member.jobRole;
+  document.getElementById('fb-candidate-name').textContent = `Feedback for ${c.member.name}`;
+
+  showScreen('screen-chat');
+  setInputDisabled(true);
+  showTyping();
+
+  try {
+    const res  = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: state.sessionId, candidate: c }) });
+    const data = await res.json();
+    hideTyping();
+    addMessage('interviewer', data.reply);
+    setInputDisabled(false);
+    focusInput();
+  } catch {
+    hideTyping();
+    addMessage('system', '⚠️  Cannot reach backend. Make sure the server is running on port 8000.');
+  }
+}
+
+/* ── Send message ────────────────────────────────────────────── */
+async function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const text  = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  addMessage('candidate', text);
+  setInputDisabled(true);
+  showTyping();
+  state.questionCount++;
+  updateCounter();
+
+  try {
+    const res  = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: state.sessionId, message: text }) });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      hideTyping(); setInputDisabled(false);
+      addMessage('system', `Error ${res.status}: ${err.detail || res.statusText}`);
+      return;
+    }
+
+    const data = await res.json();
+    hideTyping();
+    addMessage('interviewer', data.reply);
+
+    if (data.done) {
+      document.getElementById('chat-status').textContent = 'Interview complete';
+      setInputDisabled(true);
+      setTimeout(() => showFeedback(data.feedback), 900);
+    } else {
+      setInputDisabled(false);
+      focusInput();
+    }
+  } catch {
+    hideTyping(); setInputDisabled(false);
+    addMessage('system', '⚠️  Network error — please try again.');
+  }
+}
+
+/* ── DOM helpers ─────────────────────────────────────────────── */
+function addMessage(role, text) {
+  const wrap = document.getElementById('messages');
+  const div  = document.createElement('div');
+  div.className = `message message-${role}`;
+  div.innerHTML = `<div class="bubble">${esc(text)}</div>`;
+  wrap.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function showTyping() {
+  if (document.getElementById('typing-indicator')) return;
+  const wrap = document.getElementById('messages');
+  const div  = document.createElement('div');
+  div.id = 'typing-indicator';
+  div.className = 'message message-interviewer';
+  div.innerHTML  = '<div class="bubble typing"><span></span><span></span><span></span></div>';
+  wrap.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function hideTyping() { document.getElementById('typing-indicator')?.remove(); }
+
+function setInputDisabled(val) {
+  document.getElementById('msg-input').disabled = val;
+  document.getElementById('btn-send').disabled  = val;
+}
+
+function focusInput() { document.getElementById('msg-input').focus(); }
+
+function updateCounter() {
+  document.getElementById('chat-counter').textContent = `Q ${state.questionCount} / 8+`;
+}
+
+/* ── Feedback screen ─────────────────────────────────────────── */
+function showFeedback(fb) {
+  if (!fb) { addMessage('system', 'Interview done — no feedback returned.'); return; }
+
+  document.getElementById('fb-summary').innerHTML =
+    `<h3>Summary</h3><p>${esc(fb.summary ?? '—')}</p>`;
+
+  document.getElementById('fb-strengths').innerHTML =
+    `<h3>Strengths</h3><ul>${listItems(fb.strengths)}</ul>`;
+
+  document.getElementById('fb-gaps').innerHTML =
+    `<h3>Areas to Improve</h3><ul>${listItems(fb.gaps)}</ul>`;
+
+  document.getElementById('fb-next').innerHTML =
+    `<h3>Next Steps</h3><ul>${listItems(fb.next)}</ul>`;
+
+  showScreen('screen-feedback');
+}
+
+function listItems(arr) {
+  if (!Array.isArray(arr) || !arr.length) return `<li>None noted</li>`;
+  return arr.map(s => `<li>${esc(String(s))}</li>`).join('');
+}
+
+/* ── Screen routing ──────────────────────────────────────────── */
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+/* ── Restart ─────────────────────────────────────────────────── */
+function restart() {
+  state = { sessionId: null, candidate: null, selectedIdx: null, questionCount: 0 };
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('chat-status').textContent = 'Interview in progress';
+  document.getElementById('chat-counter').textContent = 'Q 0 / 8+';
+  document.querySelectorAll('.candidate-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('btn-start').disabled = true;
+  showScreen('screen-start');
+}
+
+/* ── Escape HTML ─────────────────────────────────────────────── */
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ── Event listeners ─────────────────────────────────────────── */
+document.getElementById('btn-start').addEventListener('click', startInterview);
+document.getElementById('btn-send').addEventListener('click', sendMessage);
+document.getElementById('btn-restart').addEventListener('click', restart);
+
+document.getElementById('msg-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// auto-resize textarea
+document.getElementById('msg-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+/* ── Boot ────────────────────────────────────────────────────── */
+initCandidates();
+</script>
+</body>
+</html>

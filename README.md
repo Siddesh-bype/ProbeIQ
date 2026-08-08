@@ -108,8 +108,14 @@ curl http://localhost:8000/health
 
 Enforced in `progress.py`, not by the LLM:
 ```
-done = (question_count ≥ 8) AND (covered_days ≥ 4) AND (plan exhausted OR question_count ≥ 14)
+done = (question_count >= 8) AND (covered_days >= 4) AND (plan exhausted OR question_count >= 14)
 ```
+
+---
+
+## Restart safety
+
+Sessions are stored in-memory. If the server process restarts mid-interview, active sessions are lost and clients will receive a 404 on the next turn. This is an acceptable hackathon tradeoff — the spec does not require durability across restarts. To add persistence later, swap `session_store.py`'s dict for Redis or SQLite; no other file needs to change.
 
 ---
 

@@ -1,0 +1,45 @@
+export interface Member {
+  id: string
+  name: string
+  jobRole: string
+  yearsExperience: number
+  education: string
+  status: string
+}
+
+export interface Mission {
+  day: number
+  attempts: number
+  passed: boolean
+  skipped: boolean
+}
+
+export interface Signals {
+  commitDays: number
+  missionsCompleted: number
+  missionsFirstTry: number
+}
+
+export interface Candidate {
+  member: Member
+  missions: Mission[]
+  signals: Signals
+}
+
+export interface Message {
+  role: 'interviewer' | 'candidate' | 'system'
+  text: string
+}
+
+export interface Feedback {
+  summary: string
+  strengths: string[]
+  gaps: string[]
+  next: string[]
+}
+
+export interface InterviewResponse {
+  reply: string
+  done: boolean
+  feedback?: Feedback
+}
