@@ -97,6 +97,7 @@ def chat(
                 )
                 content = response.choices[0].message.content
                 if content:
+                    log.info(f"LLM response received ({len(content)} chars, model={model})")
                     return content.strip()
             except (APITimeoutError, APIConnectionError, RateLimitError, APIError) as e:
                 log.warning("Primary LLM attempt %d/%d failed: %s", attempt + 1, _MAX_RETRIES + 1, e)
