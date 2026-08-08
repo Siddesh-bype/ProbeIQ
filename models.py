@@ -17,6 +17,13 @@ class TranscriptTurn(TypedDict):
     day: Optional[int]  # set for interviewer turns that open a new topic
 
 
+class TopicScore(TypedDict):
+    day: int
+    title: str
+    score: int  # 1 to 5
+    depth_rating: str  # "shallow" | "adequate" | "deep"
+
+
 class InterviewState(TypedDict):
     session_id: str
     candidate: dict
@@ -25,3 +32,4 @@ class InterviewState(TypedDict):
     transcript: list[TranscriptTurn]
     question_count: int
     status: Literal["IN_PROGRESS", "DONE"]
+    topic_scores: Optional[list[TopicScore]]
