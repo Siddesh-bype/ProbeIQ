@@ -2,12 +2,17 @@
 Unit tests for planner.py — pure data logic, no LLM, no real curriculum file needed.
 
 Run: python test_planner.py
+  or: pytest test_planner.py
 """
 import json
 import pathlib
 import sys
 
-# ── Patch curriculum path before importing planner ───────────────────────────
+# Try optional pytest import so file runs with pure Python standard library if needed
+try:
+    import pytest
+except ImportError:
+    pytest = None
 
 MOCK_CURRICULUM = {
     "days": [
@@ -22,16 +27,40 @@ MOCK_CURRICULUM = {
 }
 
 _tmp = pathlib.Path("_test_curriculum.json")
-_tmp.write_text(json.dumps(MOCK_CURRICULUM))
+
+
+def _setup_mock():
+    _tmp.write_text(json.dumps(MOCK_CURRICULUM))
+    import planner
+    planner.CURRICULUM_PATH = _tmp
+    planner._days_by_number = {}
+    return planner
+
+
+def _cleanup_mock():
+    if _tmp.exists():
+        _tmp.unlink()
+    try:
+        import planner
+        planner._days_by_number = {}
+    except ImportError:
+        pass
+
+
+if pytest is not None:
+    @pytest.fixture(scope="module", autouse=True)
+    def setup_test_curriculum():
+        """Create mock curriculum file for pytest and clean up after module finishes."""
+        _setup_mock()
+        yield
+        _cleanup_mock()
 
 import planner
-planner.CURRICULUM_PATH = _tmp
-planner._days_by_number = {}  # reset cache so it re-reads our mock file
 
 
 def _reload():
-    """Reset planner cache so each test starts fresh."""
-    planner._days_by_number = {}
+    """Reset planner cache so each test starts fresh with the mock curriculum."""
+    _setup_mock()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,7 +84,6 @@ def test_high_attempts_scores_highest():
     plan = planner.build_plan(candidate)
     assert plan[0]["day"] == 5, "High-attempt day should be first"
     assert plan[0]["priority"] == "high"
-    print("PASS test_high_attempts_scores_highest")
 
 
 def test_setup_days_excluded_when_plan_is_fat():
@@ -70,7 +98,6 @@ def test_setup_days_excluded_when_plan_is_fat():
     plan = planner.build_plan(candidate)
     days = [e["day"] for e in plan]
     assert 1 not in days, "SETUP day should be excluded when plan is not thin"
-    print("PASS test_setup_days_excluded_when_plan_is_fat")
 
 
 def test_fallback_pads_to_4_entries():
@@ -86,7 +113,16 @@ def test_fallback_pads_to_4_entries():
     assert len(plan) >= 4, f"Plan should have >=4 entries, got {len(plan)}"
     setup_days = {e["day"] for e in plan if e["priority"] == "low"}
     assert setup_days, "Fallback should include SETUP days when plan is thin"
-    print("PASS test_fallback_pads_to_4_entries")
+
+
+def test_secondary_fallback_pads_from_curriculum():
+    _reload()
+    # Candidate with only 1 mission — secondary fallback should pad from general curriculum to reach >=4
+    candidate = make_candidate([
+        {"day": 5, "attempts": 1, "passed": True, "skipped": False},
+    ])
+    plan = planner.build_plan(candidate)
+    assert len(plan) >= 4, f"Plan should have >=4 entries via curriculum pad, got {len(plan)}"
 
 
 def test_plan_capped_at_10():
@@ -97,7 +133,6 @@ def test_plan_capped_at_10():
     candidate = make_candidate(missions)
     plan = planner.build_plan(candidate)
     assert len(plan) <= 10, f"Plan should be capped at 10, got {len(plan)}"
-    print("PASS test_plan_capped_at_10")
 
 
 def test_skipped_mission_gets_medium_priority():
@@ -109,7 +144,6 @@ def test_skipped_mission_gets_medium_priority():
     assert len(plan) >= 1
     assert plan[0]["priority"] == "medium"
     assert "skipped" in plan[0]["reason"]
-    print("PASS test_skipped_mission_gets_medium_priority")
 
 
 def test_unknown_day_skipped_gracefully():
@@ -122,7 +156,6 @@ def test_unknown_day_skipped_gracefully():
     days = [e["day"] for e in plan]
     assert 999 not in days, "Unknown day should be silently skipped"
     assert 5 in days
-    print("PASS test_unknown_day_skipped_gracefully")
 
 
 def test_plan_entries_have_required_keys():
@@ -136,33 +169,39 @@ def test_plan_entries_have_required_keys():
     for entry in plan:
         missing = required - entry.keys()
         assert not missing, f"Plan entry missing keys: {missing}"
-    print("PASS test_plan_entries_have_required_keys")
 
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    tests = [
-        test_high_attempts_scores_highest,
-        test_setup_days_excluded_when_plan_is_fat,
-        test_fallback_pads_to_4_entries,
-        test_plan_capped_at_10,
-        test_skipped_mission_gets_medium_priority,
-        test_unknown_day_skipped_gracefully,
-        test_plan_entries_have_required_keys,
-    ]
-    failed = []
-    for t in tests:
-        try:
-            t()
-        except Exception as e:
-            print(f"FAIL {t.__name__}: {e}")
-            failed.append(t.__name__)
-
-    _tmp.unlink(missing_ok=True)  # clean up mock file
-
-    if failed:
-        print(f"\n{len(failed)} test(s) failed: {failed}")
-        sys.exit(1)
+    if pytest is not None:
+        sys.exit(pytest.main(["-v", __file__]))
     else:
-        print(f"\nAll {len(tests)} tests passed.")
+        tests = [
+            test_high_attempts_scores_highest,
+            test_setup_days_excluded_when_plan_is_fat,
+            test_fallback_pads_to_4_entries,
+            test_secondary_fallback_pads_from_curriculum,
+            test_plan_capped_at_10,
+            test_skipped_mission_gets_medium_priority,
+            test_unknown_day_skipped_gracefully,
+            test_plan_entries_have_required_keys,
+        ]
+        failed = []
+        try:
+            for t in tests:
+                try:
+                    t()
+                    print(f"PASS {t.__name__}")
+                except Exception as e:
+                    print(f"FAIL {t.__name__}: {e}")
+                    failed.append(t.__name__)
+        finally:
+            _cleanup_mock()
+
+        if failed:
+            print(f"\n{len(failed)} test(s) failed: {failed}")
+            sys.exit(1)
+        else:
+            print(f"\nAll {len(tests)} tests passed.")
+

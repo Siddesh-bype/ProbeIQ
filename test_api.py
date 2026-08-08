@@ -10,9 +10,9 @@ import types
 
 # ── Stub friend's modules before importing main ───────────────────────────────
 
-def _stub_interviewer(state):
-    entry = state["plan"][0] if state["plan"] else None
-    if not state["transcript"]:
+def _stub_interviewer(state, target_entry=None, is_followup=False, **kwargs):
+    entry = target_entry or (state["plan"][0] if state.get("plan") else None)
+    if not state.get("transcript"):
         return f"Hi {state['candidate']['member']['name']}! Let's start. Tell me about Day {entry['day'] if entry else '?'}."
     return f"Follow-up on Day {entry['day'] if entry else '?'}: can you go deeper?"
 
@@ -20,8 +20,11 @@ def _stub_feedback(state):
     return {"summary": "Good effort.", "strengths": ["clear answers"], "gaps": ["depth"], "next": ["practice more"]}
 
 # Inject stubs so main.py import doesn't need real OpenAI
+from progress import get_current_plan_entry as _get_cur_entry
 interviewer_mod = types.ModuleType("interviewer")
 interviewer_mod.interviewer_agent = _stub_interviewer
+interviewer_mod.should_followup = lambda state, msg: (False, _get_cur_entry(state), _get_cur_entry(state)["day"] if _get_cur_entry(state) else None)
+interviewer_mod.score_turn_response = lambda entry, text: {"day": entry.get("day", 1) if entry else 1, "title": entry.get("title", "") if entry else "", "score": 4, "depth_rating": "adequate"}
 sys.modules["interviewer"] = interviewer_mod
 
 feedback_mod = types.ModuleType("feedback")
