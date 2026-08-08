@@ -16,7 +16,7 @@ import session_store
 from models import InterviewState
 from planner import build_plan
 from progress import is_done, get_current_plan_entry
-from interviewer import interviewer_agent, should_followup
+from interviewer import interviewer_agent, should_followup, score_turn_response
 from feedback import feedback_generator
 
 app = FastAPI(title="ProbeIQ — AI Interview Agent", version="1.0.0")
@@ -59,12 +59,13 @@ def interview(req: InterviewRequest):
             "transcript":    [],
             "question_count": 0,
             "status":        "IN_PROGRESS",
+            "topic_scores":  [],
         }
         session_store.save(state)
 
         opening = interviewer_agent(state)
 
-        # Log the opening message to transcript
+        # Log opening message to transcript
         first_entry = get_current_plan_entry(state)
         state["transcript"].append({
             "role": "interviewer",
@@ -97,6 +98,13 @@ def interview(req: InterviewRequest):
 
     # Decide follow-up on active topic vs advance to next topic
     do_followup, active_entry, active_day = should_followup(state, req.message)
+
+    # Real-time topic score evaluation
+    if active_entry:
+        score_data = score_turn_response(active_entry, req.message)
+        if "topic_scores" not in state or state["topic_scores"] is None:
+            state["topic_scores"] = []
+        state["topic_scores"].append(score_data)
 
     # Mark active day as covered only when NOT following up on it anymore
     if not do_followup and active_day is not None:

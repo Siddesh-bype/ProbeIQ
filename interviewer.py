@@ -1,17 +1,16 @@
 """
-InterviewerAgent — generates the next interview question or follow-up via LLM.
+InterviewerAgent — generates next interview question or follow-up via LLM.
 
-Single LLM call per turn. Decides follow-up vs. advance based on:
-  1. Answer word count (< 25 words = thin)
-  2. Whether the candidate mentioned any of the day's objectives or tools
-  3. Max 2 follow-ups per day before auto-advancing
-
-For skipped missions, uses softer framing ("Did you get a chance to…")
-rather than grilling.
+Features:
+  1. Persona & Depth Adaptation based on candidate seniority (Junior, Mid, Senior)
+  2. Keyword-aware Thin-answer Heuristic
+  3. Soft Framing for Skipped Missions
+  4. Real-time Rubric & Turn Scoring (1-5 scale)
+  5. Memory Compression for long transcripts (>6 turns)
 """
 from __future__ import annotations
 import re
-from models import InterviewState, PlanEntry
+from models import InterviewState, PlanEntry, TopicScore
 from progress import get_current_plan_entry
 from llm_client import chat
 
@@ -21,11 +20,7 @@ _SYSTEM = (
     "Ask ONE focused question at a time. Keep questions concise."
 )
 
-# ── Thin-answer detection ────────────────────────────────────────────────────
-
-# Minimum word count to consider an answer substantive
 _THIN_ANSWER_WORDS = 25
-# Max follow-ups per day before moving on regardless of answer quality
 _MAX_FOLLOWUPS_PER_DAY = 2
 
 
@@ -38,6 +33,62 @@ def _get_candidate_info(candidate_obj: dict) -> tuple[str, str, str | int]:
     return name, role, exp
 
 
+def _get_persona_guidance(candidate_info: tuple[str, str, str | int]) -> str:
+    """Return persona and question depth instructions based on candidate experience level."""
+    _, role, exp = candidate_info
+    try:
+        years = int(exp)
+    except (ValueError, TypeError):
+        years = 3
+
+    if years >= 6:
+        return (
+            f"Persona Mode: Senior Expert Interviewer. Target Role: {role} ({years} yrs exp). "
+            "Probe for system design trade-offs, architecture scalability, failure modes, and production edge cases."
+        )
+    elif years >= 3:
+        return (
+            f"Persona Mode: Mid-level Practitioner Interviewer. Target Role: {role} ({years} yrs exp). "
+            "Probe for implementation details, framework/API choices, design patterns, and debugging experience."
+        )
+    else:
+        return (
+            f"Persona Mode: Encouraging Mentor Interviewer. Target Role: {role} ({years} yrs exp). "
+            "Focus on core conceptual clarity, foundational tool usage, step-by-step reasoning, and supportive tone."
+        )
+
+
+def score_turn_response(entry: PlanEntry, candidate_text: str) -> TopicScore:
+    """Evaluate candidate response quality on a 1-5 rubric scale for real-time tracking."""
+    words = candidate_text.split()
+    word_count = len(words)
+    keywords = _extract_keywords(entry)
+    hits = sum(1 for kw in keywords if kw in candidate_text.lower()) if keywords else 0
+
+    if word_count < 8:
+        score = 1
+        rating = "shallow"
+    elif (hits >= 2 and word_count >= 10) or word_count >= 40:
+        score = 5
+        rating = "deep"
+    elif hits >= 1 or word_count >= 25:
+        score = 4
+        rating = "adequate"
+    elif word_count >= 15:
+        score = 3
+        rating = "adequate"
+    else:
+        score = 2
+        rating = "shallow"
+
+    return {
+        "day": entry["day"],
+        "title": entry["title"],
+        "score": score,
+        "depth_rating": rating,
+    }
+
+
 def _last_candidate_answer(state: InterviewState) -> str:
     """Return the most recent candidate message text."""
     for turn in reversed(state["transcript"]):
@@ -46,13 +97,42 @@ def _last_candidate_answer(state: InterviewState) -> str:
     return ""
 
 
-def _recent_transcript_text(state: InterviewState, n: int = 5) -> str:
-    """Format the last n transcript turns for inclusion in the prompt."""
-    lines = []
-    for t in state["transcript"][-n:]:
+def _recent_transcript_text(state: InterviewState, max_turns: int = 5) -> str:
+    """
+    Format transcript history with memory compression.
+    If transcript is long (> 6 turns), compresses older turns into a summary header.
+    """
+    transcript = state["transcript"]
+    if not transcript:
+        return ""
+
+    if len(transcript) <= max_turns + 2:
+        lines = []
+        for t in transcript[-max_turns:]:
+            speaker = "Interviewer" if t["role"] == "interviewer" else "Candidate"
+            day_tag = f" [Day {t['day']}]" if t.get("day") else ""
+            lines.append(f"{speaker}{day_tag}: {t['text']}")
+        return "\n".join(lines)
+
+    older_turns = transcript[:-max_turns]
+    recent_turns = transcript[-max_turns:]
+
+    covered_topics = set()
+    for t in older_turns:
+        if t.get("day"):
+            covered_topics.add(str(t["day"]))
+
+    compressed_header = (
+        f"[Memory Summary of Turns 1..{len(older_turns)}: "
+        f"Already covered Days {', '.join(sorted(covered_topics)) if covered_topics else 'initial topics'}]"
+    )
+
+    lines = [compressed_header]
+    for t in recent_turns:
         speaker = "Interviewer" if t["role"] == "interviewer" else "Candidate"
         day_tag = f" [Day {t['day']}]" if t.get("day") else ""
         lines.append(f"{speaker}{day_tag}: {t['text']}")
+
     return "\n".join(lines)
 
 
@@ -65,15 +145,12 @@ def _followups_on_current_day(state: InterviewState, day: int | None) -> int:
         if t["role"] == "interviewer" and t.get("day") == day:
             count += 1
         elif t["role"] == "interviewer":
-            break  # hit a different day's question — stop counting
+            break
     return max(0, count - 1)
 
 
 def _extract_keywords(entry: PlanEntry) -> set[str]:
-    """
-    Extract meaningful keywords from a plan entry's objectives and tools.
-    Used to check if the candidate's answer actually engages with the topic.
-    """
+    """Extract keywords from a plan entry's objectives and tools."""
     keywords: set[str] = set()
     for tool in entry.get("tools", []):
         keywords.add(tool.lower())
@@ -82,40 +159,30 @@ def _extract_keywords(entry: PlanEntry) -> set[str]:
                 keywords.add(word)
     for obj in entry.get("objectives", []):
         for word in re.findall(r'[a-zA-Z]+', obj.lower()):
-            if len(word) > 4:
+            if len(word) >= 4:
                 keywords.add(word)
     return keywords
 
 
 def _is_thin(text: str, entry: PlanEntry) -> bool:
-    """
-    Determine if a candidate answer is too thin to move on.
-    Checks word count and topic keyword coverage.
-    """
+    """Determine if candidate answer is too thin to move on."""
     words = text.split()
     word_count = len(words)
 
-    # Answers with < 8 words are always thin (e.g. "yeah", "I did that")
     if word_count < 8:
         return True
-
-    # Answers with >= 50 words are detailed enough
     if word_count >= 50:
         return False
 
-    # Check keyword hits from objectives/tools
     keywords = _extract_keywords(entry)
     if keywords:
         answer_lower = text.lower()
         hits = sum(1 for kw in keywords if kw in answer_lower)
-        # If the answer has 1+ keyword hits and is at least 15 words, it's substantive!
         if hits >= 1 and word_count >= 15:
             return False
-        # If no keyword hits, answers under 35 words are thin
         if hits == 0 and word_count < 35:
             return True
 
-    # Default fallback based on word count limit
     return word_count < _THIN_ANSWER_WORDS
 
 
@@ -129,7 +196,7 @@ def should_followup(
     state: InterviewState, last_message: str
 ) -> tuple[bool, PlanEntry | None, int | None]:
     """
-    Decide whether to ask a follow-up on the current active topic or advance.
+    Decide whether to ask a follow-up on current active topic or advance.
     Returns (do_followup, active_entry, active_day).
     """
     last_interviewer_turn = next(
@@ -158,7 +225,7 @@ def interviewer_agent(
     target_entry: PlanEntry | None = None,
     is_followup: bool = False,
 ) -> str:
-    """Return the next interviewer message (opening or question/follow-up)."""
+    """Return next interviewer message (opening or question/follow-up)."""
     is_opening = len(state["transcript"]) == 0
 
     if is_opening:
@@ -186,8 +253,9 @@ def interviewer_agent(
 
 
 def _opening_prompt(candidate_info: tuple[str, str, str | int], entry: PlanEntry) -> str:
-    """Build the prompt for the very first turn — warm greeting + first question."""
+    """Build prompt for the opening turn with persona guidance."""
     name, role, exp = candidate_info
+    persona = _get_persona_guidance(candidate_info)
     skipped_note = ""
     if _is_skipped_topic(entry):
         skipped_note = (
@@ -196,6 +264,7 @@ def _opening_prompt(candidate_info: tuple[str, str, str | int], entry: PlanEntry
         )
 
     return f"""Candidate: {name}, {exp} years experience, role: {role}
+{persona}
 
 Open the interview with a warm, personalized greeting (1–2 sentences), then ask your first question.
 
@@ -213,11 +282,13 @@ def _question_prompt(
     state: InterviewState,
     follow_up: bool,
 ) -> str:
-    """Build the prompt for turn 2+ — either a follow-up or a new topic question."""
+    """Build prompt for turn 2+ with persona guidance and memory compression."""
     name, role, _ = candidate_info
+    persona = _get_persona_guidance(candidate_info)
+
     if follow_up:
         action = (
-            "The candidate's last answer was brief or didn't engage with the topic specifics. "
+            "The candidate's last answer was brief or didn't engage with topic specifics. "
             "Ask a follow-up that probes deeper on the SAME topic. Reference a specific objective or tool."
         )
     else:
@@ -232,6 +303,7 @@ def _question_prompt(
         action = transition
 
     return f"""Candidate: {name}, {role}
+{persona}
 
 Current topic — Day {entry['day']}: {entry['title']}
 Objectives: {', '.join(entry['objectives'][:3])}
