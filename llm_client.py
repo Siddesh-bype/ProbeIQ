@@ -3,7 +3,7 @@ LLM client wrapper — single swap point with multi-provider fallback.
 All LLM calls in the project go through chat() here.
 
 Fallback sequence:
-  1. Primary LLM (OpenAI API using OPENAI_API_KEY)
+  1. Primary LLM (OpenRouter API using OPENROUTER_API_KEY)
   2. Local LLM / Ollama (OpenAI-compatible server at OLLAMA_BASE_URL, default http://localhost:11434/v1)
   3. Offline Mock Fallback (Guarantees zero crashes during live demos if network/API key fails)
 """
@@ -18,7 +18,7 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-_openai_client: OpenAI | None = None
+_openrouter_client: OpenAI | None = None
 _ollama_client: OpenAI | None = None
 
 # Default timeouts and retries
@@ -27,17 +27,21 @@ _MAX_RETRIES = 1
 _RETRY_DELAY = 2
 
 
-def _get_openai_client() -> OpenAI | None:
-    """Return initialized OpenAI client if API key is present."""
-    global _openai_client
-    if _openai_client is None:
-        api_key = os.environ.get("OPENAI_API_KEY")
+def _get_openrouter_client() -> OpenAI | None:
+    """Return initialized OpenRouter client if API key is present."""
+    global _openrouter_client
+    if _openrouter_client is None:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
         if api_key and not api_key.startswith("sk-placeholder"):
             try:
-                _openai_client = OpenAI(api_key=api_key, timeout=_TIMEOUT)
+                _openrouter_client = OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=api_key,
+                    timeout=_TIMEOUT
+                )
             except Exception as e:
-                log.warning("Failed to initialize OpenAI client: %s", e)
-    return _openai_client
+                log.warning("Failed to initialize OpenRouter client: %s", e)
+    return _openrouter_client
 
 
 def _get_ollama_client() -> OpenAI | None:
@@ -77,12 +81,12 @@ def chat(
     """
     Send a list of {role, content} messages to LLM and return reply text.
 
-    Tries Primary OpenAI → Local Ollama → Offline Mock Fallback.
+    Tries Primary OpenRouter → Local Ollama → Offline Mock Fallback.
     """
-    # ── 1. Try Primary OpenAI ────────────────────────────────────────────────
-    primary_client = _get_openai_client()
+    # ── 1. Try Primary OpenRouter ────────────────────────────────────────────────
+    primary_client = _get_openrouter_client()
     if primary_client is not None:
-        model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        model = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 response = primary_client.chat.completions.create(

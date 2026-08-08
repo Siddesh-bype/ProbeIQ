@@ -12,7 +12,7 @@ pip install -r requirements.txt
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your OPENROUTER_API_KEY
 
 # 3. Add your data files
 # Place candidates.json and curriculum.json in the project root
@@ -122,4 +122,6 @@ Sessions are stored in-memory. If the server process restarts mid-interview, act
 ## Swapping the LLM provider
 
 Edit `llm_client.py` only. Everything else is provider-agnostic.
-Set `LLM_MODEL` in `.env` to change the model (default: `gpt-4o-mini`).
+Set `LLM_MODEL` in `.env` to change the model (default: `openai/gpt-4o-mini`).
+
+Currently configured for OpenRouter with fallback to local Ollama then offline mock.
