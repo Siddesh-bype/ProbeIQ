@@ -21,7 +21,7 @@ class InterviewState(TypedDict):
     session_id: str
     candidate: dict
     plan: list[PlanEntry]
-    covered_days: set  # set[int] — days already explored
+    covered_days: set[int]
     transcript: list[TranscriptTurn]
     question_count: int
     status: Literal["IN_PROGRESS", "DONE"]
