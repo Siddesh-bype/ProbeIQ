@@ -5044,6 +5044,17 @@ Actually maybe my started process 14768 is listening; the pre-existing 5612's no
 Actually, I bet the situation: the user already had a dev server running BEFORE I started mine (PID 5612 → node 2). When I ran mine, my `npx next dev` - the pre-existing server had the "Recruiter review" version of page.tsx compiled & cached in memory from a PREVIOUS session, but... no, that doesn't make sense either; a dev server reads from disk each request.
 
 Let me simplify: I should just directly verify what's on disk for the header. Maybe the disk file DOES include "Recruiter review" and my earlier read was of a different (aborted write?) version. Wait — the earlier read in this "recheck" turn showed nav WITHOUT Recruiter review, but the git log shows commit "Add glassmorphic landing page". The source on disk may have been modified by the user AFTER the commit, adding "Recruiter review". But `git status` earlier showed clean working tree (only ailog untracked). If page.tsx had uncommitted changes, git status would show `M frontend/app/page.tsx`. It showed clean. So disk == HEAD.
+This means the running dev server is serving a DIFFERENT version of page.tsx than what's on disk. Possibly a STALE build or a DIFFERENT server still running from earlier (the user's `npx next dev -p 3001` from before got stopped... but I started a new one). Actually maybe there was ALREADY a dev server running on 3001 from the user's previous session (background command "Start Next.js frontend" was stopped earlier though).
+
+Hmm, this is getting confusing. The served page's h1 is "ProbeIQ"? That could match EITHER a version with h1 = "ProbeIQ"... Let me just fetch the actual HTML served and the actual current file content to reconcile. Possibly the dev server is serving stale. Also possible there was another dev server on 3001 before I started mine, and mine failed to bind (port in use), so the OLD server is still serving. Let me check dev log and process.
+
+Note: I started frontend via cmd with `npx next dev -p 3001` writing to %TEMP%\probeiq-frontend.log. Let me check that log for "Ready" and any errors. Also check if another process holds port 3001.
+
+Actually the earlier curl showed frontend 200 but that could be the OLD server. The dev log I got at that point showed "Ready in 5.7s" — so presumably the new one bound. But wait, if it failed to bind because port in use, it would error. Let me look.
+
+The served page differs from the file on disk (the header shows "Recruiter review" which isn't in the source I read). A stale server may be running. Let me investigate
+
+{{ ... }}
 
 But HEAD (c06ca73) nav has no Recruiter review. Contradiction with browser.
 
