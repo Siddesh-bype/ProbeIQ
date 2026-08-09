@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'ProbeIQ — AI Interview Agent',
-  description: 'AI-powered technical interview agent',
+  description: 'Realistic multi-turn technical interviews grounded in a candidate\'s actual work, with structured, honest feedback.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
